@@ -1,0 +1,554 @@
+---
+title: "Data Processing in R"
+author: "Bruce Bugbee"
+date: "August 11, 2016"
+output: ioslides_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Repo
+All slides and code examples can be found on my GitHub:
+
+[https://github.com/BruceBugbee/rmacc-R-talk](https://github.com/BruceBugbee/rmacc-R-talk)
+
+## What is R?
+R is an open source statistical programming language designed to be good at things involving data.
+
+![http://spectrum.ieee.org/computing/software/the-2016-top-programming-languages](img/ieee_ranking.png)
+
+## What is a Data Analysis Pipeline? | You worked hard and got all of this data. Now what?
+
+Good data analysis frameworks have lots of pieces:
+
+- Importing data
+- Getting data into a usable form
+- Cleaning data
+- Slicing, subsetting, merging, etc.
+- Visualization 
+- Exploratory analysis
+- Complicated statistical models
+
+## Data storage structures in R
+R is an object oriented programming language and has the corresponding capabilities for creating various data structures. However, the bulk of common tasks are done using the base data storage objects:
+
+- Vectors
+- Matrices/Arrays
+- Data frames, tables, etc. (tabular data of varying types)
+- Lists
+- Factors
+
+## Getting data into R
+
+__Tabular Data__ 
+
+- CSV, tab delimited, JSON, etc.
+- base functions (read.table), **readr** (efficient versions), **jsonlite** (JSON interpretation)
+
+__Databases__
+
+- **dplyr**, **RSQLite**, **RMySQL**, etc.
+
+__API/Web__
+
+- **httr** (API access)
+- **RCurl** (libcurl wrapper)
+- rOpenSci (list of open science data packages)
+
+## Data Analysis Pipeline Goals
+Once data get's brought into R, it can be easy to lose track of things. A good data analysis pipeline should be:
+
+- Efficient
+- Readable
+- Interpretable
+- Reproducible
+- Flexible
+
+## My Pipeline
+__dplyr__
+
+- Solid frame work for slicing, filtering, grouping, and combining data frames
+- Easy integration with database backends
+- Provides %>% piping operated (integrated from **magrittr**)
+- Functions written in C++ to leverage speed ups
+
+__tidyr__
+
+- Functionality for reshaping data frames
+- "Tidy data" --> each row an observation, each column a variable (Long vs wide)
+
+
+## Let's set up our workflow
+
+```{r, warning = FALSE, message = FALSE}
+library(dplyr)
+library(tidyr)
+```
+
+## Going to need some data to play with
+
+```{r flights}
+library(nycflights13)
+head(flights) #on-time data for departure flights in NYC for 2013
+```
+
+## Common tasks
+Most data analysis problems involve a handful of common tasks:
+
+- Subsetting
+- Mutating
+- Grouping
+- Summarizing
+- Combining
+- Reshaping
+
+Even the most involved tasks typically are just combinations of these simple operations.
+
+## Subsetting | Subsetting Columns
+
+The _select_ function is the workhorse for select sets of columns from a data frame.
+
+```{r}
+flights_small <- select(flights, carrier, flight, origin)
+#Notice the lack of "" around column names
+#vignette("nse") has a lot of info on non standard evaluation
+glimpse(flights_small, width = 50) 
+```
+
+## Subsetting | Special Functions for Select
+
+__select__ has a number of special functions that makes dealing with large sets of columns easy.
+
+```{r, eval = FALSE}
+select(flights, contains("time")) #matches character string
+select(flights, starts_with("air")) 
+select(flights, ends_with("num"))
+select(flights, matches("ta.")) #regular expression matches
+select(flights, one_of(c("tailnum", "distance")))
+select(flights, num_range("x", 1:2)) #any column of the form x1, x2
+```
+
+## Subsetting | Removing Columns
+Just like with base R, removal can be done by using a '-' with the appropriate index. These work in select as well.
+```{r, echo = TRUE}
+flights_noyear <- select(flights, -year)
+flights_notimeordelay <- select(flights, -contains("time"), 
+                                -contains("delay"))
+```
+
+## Subsetting | Removing Columns
+```{r}
+glimpse(flights_notimeordelay, width = 50)
+```
+
+## Subsetting | Subsetting Rows
+The __filter__ function is pretty robust at pulling out subsets of data that meet some logical condition.
+
+```{r}
+flights_united <- filter(flights, carrier == "UA")
+flights_morningdep <- filter(flights, dep_time <= 1200)
+flights_special <- filter(flights, dest == "DEN" &
+                            carrier == "DL" &
+                            between(dep_time, 1000, 1400) &
+                            month %in% c(6, 7, 8))
+```
+
+## Subsetting | Removing Duplicate Rows
+The __distinct__ function can be useful for dealing with duplicate entries.
+
+```{r}
+flights_distinct <- distinct(flights)
+nrow(flights_distinct) == nrow(flights) #check dimensions
+```
+
+
+## Subsetting | Subsetting Rows
+```{r}
+flights_special
+```
+
+## Subsetting | Sampling Data Frames
+
+__sample_n__ will sample a given number of rows while __sample_frac__ will sample a given proportion
+
+```{r, eval = FALSE}
+sample_n(flights, 100)
+sample_frac(flights, 0.1)
+```
+
+## Subsetting | Slicing Data Frames
+__slice__ can be used to pull out specific rows while __top_n__ can be used to pull top/bottom sets
+
+```{r, eval = FALSE}
+slice(flights, 1:n()) #note that n() is a special function in dplyr
+slice(flights, 10:n())
+top_n(flights, 100) #first 100 entries
+top_n(flights, -50) #bottom 50
+```
+Note that you can also use the __filter__ function to deal with this stuff by calling the special __row_number__ function but will be slower.
+
+## Mutating | Creating New Columns
+
+__mutate__ is the workhorse for calculating new variables. The output of the function being called by __mutate__ can have one of two results:
+- output of the same length as the number of rows in the data frame
+- scalar output (will map single value to every entry)
+
+```{r, eval = FALSE}
+mutate(flights, distance = distance * 1.6) #convert to km
+mutate(flights, carrier_flight = paste(carrier, flight))
+mutate(flights, max_delay = max(c(dep_delay, arr_delay))) #scalar
+```
+
+Operations are carried out across columns very similar to the vectorized forms of R's base operations. __mutate__ is useful for adding new columns or modifying existing
+
+## Mutating | Mutating Multiple Columns
+```{r, eval = FALSE}
+mutate(flights, carrier_flight = paste(carrier, flight), 
+       distance_km = distance * 1.6)
+```
+
+## Mutating | Special Mutate Functions
+
+```{r}
+flights_small <- select(flights, month, day, distance)
+get_months <- function(x) return(month.abb[x])
+flights_special <- mutate_at(flights_small, vars(month), get_months)
+head(flights_special)
+```
+
+## Mutating | Special Mutate Functions
+```{r}
+flights_special2 <- mutate_if(flights_special, is.character, toupper)
+head(flights_special2)
+```
+
+## Mutating | Keeping Only New Columns
+
+__transmute__ does the same thing as __mutate__ except it drops all of the old columns as well.
+
+```{r}
+flights_km <- transmute(flights, distance_km = distance * 1.6)
+head(flights_km)
+```
+
+## Grouping
+Looking at the entire data set is interesting, but often time comparisons want to be made across multiple groups. __group_by__ provides this functionality
+```{r}
+flights_by_month <- group_by(flights, month)
+class(flights)
+class(flights_by_month)
+```
+
+## Grouping
+```{r}
+print(flights_by_month, width = 60)
+```
+
+## Grouping | How Grouping Works
+The __grouped_df__ structures can be thought of as many smaller data frames kept together. Instead of operations being done over the entire data frame, they are done over each sub data frame.
+
+```{r}
+flights_max <- mutate(flights, max_day = max(day))
+flights_max2 <- mutate(flights_by_month, max_day = max(day))
+```
+
+## Grouping | How Grouping Works
+```{r}
+table(flights_max$max_day)
+table(flights_max2$max_day)
+```
+
+## Grouping | Ungrouping
+The __ungroup__ function removes the grouping structure of a data frame.
+
+```{r}
+flights2 <- ungroup(flights_by_month)
+class(flights2)
+```
+
+## Summarising | Where Groups Are Powerful
+The __summarise__ function produces scalar summary statistics according to the grouping structure present. For ungrouped data, it defaults to the entire data frame.
+```{r}
+summarise(flights, Delay_Avg = mean(arr_delay, na.rm = T),
+          Distance_Avg = mean(distance),
+          Distance_SD = sd(distance),
+          Most_Common_Carrier = names(sort(table(carrier)))[1])
+```
+
+## Summarising | Where Groups Are Powerful
+```{r, eval = FALSE}
+summarise(flights_by_month, Delay_Avg = mean(arr_delay, na.rm = T),
+          Distance_Avg = mean(distance),
+          Distance_SD = sd(distance),
+          Most_Common_Carrier = names(sort(table(carrier)))[1])
+```
+
+## Summarising | Where Groups Are Powerful
+```{r, echo = F}
+summarise(flights_by_month, Delay_Avg = mean(arr_delay, na.rm = T),
+          Distance_Avg = mean(distance),
+          Distance_SD = sd(distance),
+          Most_Common_Carrier = names(sort(table(carrier)))[1])
+```
+
+## Summarising | Where Groups Are Powerful
+```{r, eval = FALSE}
+flights_by_carrier  <- group_by(flights, carrier)
+summarise(flights_by_carrier, Delay_Avg = mean(arr_delay, na.rm = T))
+```
+
+## Summarising | Where Groups Are Powerful
+```{r, echo = FALSE}
+flights_by_carrier  <- group_by(flights, carrier)
+summarise(flights_by_carrier, Delay_Avg = mean(arr_delay, na.rm = T))
+```
+
+## Summarising | Multiple Groups
+You can nest groups by specifying multiple grouping columns in __group_by__.
+
+```{r}
+flights_by_date <- group_by(flights, month, day)
+```
+
+## Summarising | Multiple Groups
+```{r, echo = FALSE}
+flights_by_date
+```
+
+## Summarising | Multiple Groups
+```{r, eval = F}
+summarise(flights_by_date, Delay_Avg = mean(arr_delay, na.rm = T),
+          Distance_Avg = mean(distance),
+          Distance_SD = sd(distance),
+          Most_Common_Carrier = names(sort(table(carrier)))[1])
+```
+
+## Summarising | Multiple Groups
+```{r, echo = FALSE}
+summarise(flights_by_date, Delay_Avg = mean(arr_delay, na.rm = T),
+          Distance_Avg = mean(distance),
+          Distance_SD = sd(distance),
+          Most_Common_Carrier = names(sort(table(carrier)))[1])
+```
+
+## Combining | Joins
+__dplyr__ has multiple types of join operators for combining multiple data frames by common factors. 
+
+- __inner_join__: all rows of __x__ that have matches in __y__
+- __left_join__: non matching rows of __x__ are giving NA values for columns in __y__
+- __right_join__: all rows of __y__ that have matches in __x__ with NAs for columns of __x__
+- __semi_join__: all rows of __x__ that have matches in __y__, keeps only colmuns from __x__
+- __full_join__: puts NAs where there are non matches
+
+## Combining | Binds
+Bind operators simply append data frames together with some attempts at column matching (__bind_rows__) if available.
+
+- __bind_rows__: akin to __rbind__ in base R
+- __bind_cols__: akin to __cbind__ in base R
+
+Note: __bind_rows__ and __bind_cols__ can be used over lists of data frames. This is particularly useful when you are pulling output out of a loop.
+
+## Combining
+
+```{r}
+airlines
+```
+
+## Combining
+```{r}
+flights_with_airlines <- left_join(flights, airlines, by = "carrier")
+select(flights_with_airlines, carrier, name)
+```
+
+## Piping | Motivating example
+Let's say we wanted to do analysis about distance traveled and delays for Southwest, Delta, United, and Virgin America on a quarterly basis. The code might look something like this:
+
+```{r}
+flights2 <- group_by(filter(left_join(flights, airlines, 
+                                      by = "carrier") , 
+                            carrier %in% c("WN", "UA", "VX", "DL")), 
+                     name)
+```
+
+## Piping | Motivating example
+Slightly more readable code:
+```{r}
+flights2 <- left_join(flights, airlines, by = "carrier") 
+flights3 <- filter(flights2, carrier %in% c("WN", "UA", "VX", "DL"))
+flights4 <- group_by(flights3, name)
+flights_sum <- summarise(flights4,
+                         Avg_Distance = mean(distance, na.rm = T),
+                         Avg_Delay = mean(arr_delay, na.rm = T))
+```
+
+## Piping | Motivating example
+
+```{r}
+flights_sum
+```
+
+## Piping | Messy code
+This solution works ok and yields valid results. However, it is really easy to loose track of all these different data frame floating around. This leads to messy and potentially troublesome code. It is quite easy to make mistakes or lose track of goals when dealing with many nested function calls.
+
+This is where the __%>%__ piping operator comes into play! This operator takes the data frame on the left, performs the operation, and pushes the output down the pipe to the right.
+
+## Piping | Better Code
+```{r, eval = F}
+flights_sum <- flights %>%
+  left_join(airlines, by = "carrier") %>%
+  filter(carrier %in% c("WN", "UA", "VX", "DL")) %>%
+  group_by(name) %>%
+  summarise(Avg_Distance = mean(distance, na.rm = T), 
+            Avg_Delay = mean(arr_delay, na.rm = T))
+```
+
+This provides a clear and structures narrative for what we are doing to the data. 
+
+## Piping | Better Code
+```{r}
+flights_sum
+```
+
+## Piping
+- The __%>%__ operator automatically treats the first argument of the function as the "data" argument.
+- Use the special __.__ to directly reference the left handed data stream. This is useful if the function has a different first parameter arugment
+- Indentation and code readibility are your friends!
+
+## Piping | Additional Examples
+Let's say we wanted to pull out the average of the top 5 longest delayed flights for each carrier for each month. 
+```{r, message = FALSE, eval = F}
+flights_long_delay <- flights %>%
+  group_by(carrier, month) %>%
+  arrange(arr_delay) %>%
+  top_n(5) %>%
+  summarise(Avg_Delay = mean(arr_delay, na.rm = T))
+```
+
+## Piping | Additional Examples
+
+```{r, message = FALSE, echo = F}
+flights_long_delay <- flights %>%
+  group_by(carrier, month) %>%
+  arrange(arr_delay) %>%
+  top_n(5) %>%
+  summarise(Avg_Delay = mean(arr_delay, na.rm = T))
+flights_long_delay
+```
+
+## Reshaping
+Rearranging the data in a way that makes more sense is a pretty common task. Some of the useful functions that come with this pipeline are:
+
+- __arrange__: Sorts according to column(s) specification. Can be nested or used within groups.
+- __gather__: Function from the __tidyr__ package. Useful for making "tall" data from "wide".
+- __spread__: Function from the __tidyr__ package. Useful for making "wide" data from "tall" data.
+
+## Vizualization
+One of the most powerful features in R is it's visualization capablity. These have been extended by the very popular package __ggplot2__. Rather than accepting individual vectors and structures like base plot functions, __ggplot2__ is dependent on providing a data frame structure. When you combine this the __dplyr__ pipeline, you can get some pretty great viz very simply.
+
+## Vizualization | Histogram of Arrival Delays
+```{r, message = F, warning = F, eval = F}
+library(ggplot2)
+ggplot(flights, aes(x = arr_delay)) +
+  geom_histogram()
+```
+
+## Vizualization | Histogram of Arrival Delays
+```{r, message = F, warning = F, echo = F}
+library(ggplot2)
+ggplot(flights, aes(x = arr_delay)) +
+  geom_histogram()
+```
+
+## Vizualization | Prettier Histogram of Arrival Delays
+```{r, message = F, warning = F, eval = F}
+ggplot(flights, aes(x = arr_delay)) +
+  geom_histogram(fill = "magenta", alpha = .7, colour = "black") + 
+  theme_bw()
+```
+
+## Vizualization | Prettier Histogram of Arrival Delays
+```{r, message = F, warning = F, echo = F}
+ggplot(flights, aes(x = arr_delay)) +
+  geom_histogram(fill = "magenta", alpha = .7, colour = "black") +
+  theme_bw()
+```
+
+## Vizualization | Prettier Histogram of Arrival Delays by Carrier
+```{r, message = F, warning = F, eval = F}
+ggplot(flights, aes(x = arr_delay)) +
+  facet_wrap(~ carrier) +
+  geom_histogram(fill = "magenta", alpha = .7, colour = "black") + 
+  theme_bw()
+```
+
+## Vizualization | Prettier Histogram of Arrival Delays by Carrier
+```{r, message = F, warning = F, echo = F}
+ggplot(flights, aes(x = arr_delay)) +
+  facet_wrap(~ carrier) +
+  geom_histogram(fill = "magenta", alpha = .7, colour = "black") + 
+  theme_bw()
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r}
+total_delays <- flights %>%
+  group_by(month, day, carrier) %>%
+  summarise(Num_Delays = sum(arr_delay > 0 | dep_delay > 0, na.rm = T)) %>%
+  left_join(airlines, by = "carrier") %>%
+  group_by(carrier) %>%
+  arrange(month, day) %>%
+  mutate(day_of_year = 1:n()) %>%
+  ungroup()
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r}
+glimpse(total_delays) 
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r, warning = F, message = F, eval = F}
+ggplot(total_delays, aes(x = Num_Delays)) +
+  facet_wrap(~ carrier) +
+  geom_histogram(alpha = .7, fill = "dodgerblue") +
+  theme_dark() +
+  labs(y = "Frequency", x = "# of Daily Delays")
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r, warning = F, message = F, echo = F}
+ggplot(total_delays, aes(x = Num_Delays)) +
+  facet_wrap(~ carrier) +
+  geom_histogram(alpha = .7, fill = "dodgerblue") +
+  theme_dark() +
+  labs(y = "Frequency", x = "# of Daily Delays")
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r, warning = F, message = F, eval = F}
+ggplot(total_delays, aes(x = day_of_year, y = Num_Delays,
+                         colour = carrier)) +
+  geom_line() + 
+  theme_bw() +
+  labs(y = "# of Delays", x = "Day of Year")
+```
+
+## Vizualization | Total # of Delays by Date and Carrier
+```{r, warning = F, message = F, echo = F}
+ggplot(total_delays, aes(x = day_of_year, y = Num_Delays,
+                         colour = carrier)) +
+  facet_wrap(~carrier) +
+  geom_line() + 
+  theme_bw() +
+  labs(y = "# of Delays", x = "Day of Year") 
+```
+
+## Conclusion
+- Data pipelines with __dplyr__ makes life a lot easier.
+- Code readiblity and flexibility is important
+- This pipeline makes playing with __ggplot2__ a breeze.
+
+GitHub: [https://github.com/BruceBugbee/rmacc-R-talk](https://github.com/BruceBugbee/rmacc-R-talk)
+
